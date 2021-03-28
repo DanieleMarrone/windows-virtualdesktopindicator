@@ -73,13 +73,12 @@ namespace VirtualDesktopIndicator
             OnThemeChanged(new ThemeEventArgs(CurrentTheme));
         }
 
+        private void OnRegistryError(object sender, ErrorEventArgs e) => StopRegistryMonitor();
+
         protected virtual void OnThemeChanged(ThemeEventArgs e)
         {
             ThemeChanged?.Invoke(this, e);
         }
-
-        private void OnRegistryError(object sender, ErrorEventArgs e) => StopRegistryMonitor();
-
     }
 
 

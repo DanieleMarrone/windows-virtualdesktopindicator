@@ -1,22 +1,49 @@
-﻿using Microsoft.Win32;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Text;
-using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
-using VirtualDesktopIndicator.Helpers;
+
 
 namespace VirtualDesktopIndicator
 {
+    public struct Palette
+    {
+        public Palette(Color foregroundColor, Color backgroundColor)
+        {
+            ForegroundColor = foregroundColor;
+            BackgroundColor = backgroundColor;
+        }
+
+        public Color ForegroundColor { get; }
+        public Color BackgroundColor { get; }
+
+    }
+
+    public struct IconSet
+    {
+        public IconSet(Icon @default, Icon active)
+        {
+            Default = @default;
+            Active = active;
+        }
+
+        public Icon Default { get; }
+        public Icon Active { get; }
+    }
+
+
     class TrayIndicator : IDisposable
     {
         private static string AppName =>
             Assembly.GetExecutingAssembly().GetName().Name;
 
-        private NotifyIcon trayIcon;
+        private int NDesktops { get; }
+
+        private NotifyIcon[] trayIcons;
+        private IconSet[] icons;
+
+        private ThemeMonitor themeMonitor;
         private Timer timer;
 
         #region Virtual Desktops
@@ -24,81 +51,49 @@ namespace VirtualDesktopIndicator
         private static int CurrentVirtualDesktop =>
             VirtualDesktopApi.Desktop.FromDesktop(VirtualDesktopApi.Desktop.Current) + 1;
 
-        private int previewVirtualDesktop;
+        private int previousVirtualDesktop;
 
         private static int VirtualDesktopsCount =>
             VirtualDesktopApi.Desktop.Count;
 
         #endregion
 
+
         #region Theme
 
-        private const string RegistryThemeDataPath =
-            @"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
-
-        private enum Theme { Light, Dark }
-
-        private static readonly Dictionary<Theme, Color> ThemesColors = new Dictionary<Theme, Color>()
+        private static readonly Dictionary<Theme, Palette> ThemesColors = new Dictionary<Theme, Palette>()
         {
-            { Theme.Dark, Color.White },
-            { Theme.Light, Color.Black },
+            { Theme.Dark, new Palette(Color.White, Color.Black) },
+            { Theme.Light, new Palette(Color.Black, Color.White) },
         };
 
-        private Color CurrentThemeColor => ThemesColors[systemTheme];
-
-        private Theme cachedSystemTheme;
-        private Theme systemTheme;
-
-        private RegistryMonitor registryMonitor;
+        private Palette CurrentThemeColors => ThemesColors[themeMonitor.CurrentTheme];
 
         #endregion
 
-        #region Drawing data 
-
-        // Default windows tray icon size
-        private const int BaseHeight = 16;
-        private const int BaseWidth = 16;
-
-        // We use half the size, because otherwise the image is rendered with incorrect anti-aliasing
-        private int Height
+        public TrayIndicator(int nDesktops)
         {
-            get
-            {
-                var height = SystemMetricsApi.GetSystemMetrics(SystemMetric.SM_CYICON) / 2;
-                return height < BaseHeight ? BaseHeight : height;
-            }
-        }
-        private int Width
-        {
-            get
-            {
-                var width = SystemMetricsApi.GetSystemMetrics(SystemMetric.SM_CXICON) / 2;
-                return width < BaseWidth ? BaseWidth : width;
-            }
-        }
+            NDesktops = nDesktops;
 
-        private int BorderThinkness => Width / BaseWidth;
+            themeMonitor = new ThemeMonitor();
+            themeMonitor.ThemeChanged += (s, e) => { CreateIcons(); RefreshIcons(); };
 
-        private const string FontName = "Tahoma";
-        private int FontSize => (int)Math.Ceiling(Width / 1.5);
-        private FontStyle FontStyle = FontStyle.Regular;
-
-        string cachedDisplayText;
-
-        #endregion
-
-        public TrayIndicator()
-        {
-            trayIcon = new NotifyIcon { ContextMenuStrip = CreateContextMenu() };
-            trayIcon.Click += TrayIconClick;
-
-            timer = new Timer { Enabled = false };
+            timer = new Timer { Interval = 250, Enabled = false };
             timer.Tick += TimerTick;
 
-            InitRegistryMonitor();
+            icons = new IconSet[NDesktops];
 
-            cachedSystemTheme = systemTheme = GetSystemTheme();
+            trayIcons = new NotifyIcon[NDesktops];
+            for (int i = 0; i < NDesktops; i++)
+            {
+                trayIcons[i] = new NotifyIcon() { Tag = i, Text = $"Desktop {i+1}" };
+                trayIcons[i].Click += TrayIconClick;
+            }
+
+            CreateIcons();
+            RefreshIcons();
         }
+
 
         #region Events
 
@@ -106,190 +101,113 @@ namespace VirtualDesktopIndicator
         {
             try
             {
-                if (CurrentVirtualDesktop == previewVirtualDesktop) return;
+                RefreshTooltips();
 
-                cachedDisplayText = CurrentVirtualDesktop < 100 ? CurrentVirtualDesktop.ToString() : "++";
-                previewVirtualDesktop = CurrentVirtualDesktop;
-
-                RedrawIcon();
+                if (CurrentVirtualDesktop != previousVirtualDesktop)
+                {
+                    previousVirtualDesktop = CurrentVirtualDesktop;
+                    RefreshIcons();
+                }
             }
             catch
             {
-                MessageBox.Show(
-                    "An unhandled error occured!",
-                    "VirtualDesktopIndicator",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error
-                );
-
+                ShowError("An unhandled error occured!");
                 Application.Exit();
             }
         }
 
+        private void ShowError(string error)
+        {
+            MessageBox.Show(
+                error,
+                "VirtualDesktopIndicator",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
+        }
+
+
+        private void RefreshTooltips()
+        {
+            int i;
+            for (i = 0; i < VirtualDesktopsCount && i < NDesktops; i++)
+                trayIcons[i].Text = VirtualDesktopApi.Desktop.DesktopNameFromIndex(i);
+            for (; i < NDesktops; i++)
+                trayIcons[i].Text = $"Desktop {i + 1}";
+        }
+
         private void TrayIconClick(object sender, EventArgs e)
         {
-            /*
-            MouseEventArgs me = e as MouseEventArgs;
+            int i = (int)(sender as NotifyIcon).Tag;
 
-            if (me.Button == MouseButtons.Left)
-                ShowTaskView();
-            */
+            if (i == CurrentVirtualDesktop - 1)
+                return;
+
+            SwitchToDesktop(i);
+        }
+
+        private void SwitchToDesktop(int index)
+        {
+            // create desktop if not exists
+            for (int i = VirtualDesktopsCount; i <= index; i++)
+                VirtualDesktopApi.Desktop.Create();
+
+            VirtualDesktopApi.Desktop.FromIndex(index).MakeVisible();
+
+            RefreshIcons();
         }
 
         #endregion
 
         public void Display()
         {
-            registryMonitor.Start();
+            themeMonitor.Start();
 
-            trayIcon.Visible = true;
             timer.Enabled = true;
+
+            for (int i = 0; i < NDesktops; i++)
+                trayIcons[i].Visible = true;
         }
 
         public void Dispose()
         {
-            StopRegistryMonitor();
+            Dispose(true);
+        }
 
-            trayIcon.Dispose();
+        protected virtual void Dispose(bool disposing)
+        {
+
+            for (int i = 0; i < NDesktops; i++)
+                trayIcons[i].Visible = false;
+
+            for (int i = 0; i < NDesktops; i++)
+                trayIcons[i].Dispose();
+
             timer.Dispose();
         }
 
-        private void InitRegistryMonitor()
+        ~TrayIndicator()
         {
-            registryMonitor = new RegistryMonitor(RegistryThemeDataPath);
-
-            registryMonitor.RegChanged += new EventHandler(OnRegistryChanged);
-            registryMonitor.Error += new ErrorEventHandler(OnRegistryError);
+            Dispose(false);
         }
 
-        private void StopRegistryMonitor()
+        private void CreateIcons()
         {
-            if (registryMonitor == null) return;
-
-            registryMonitor.Stop();
-            registryMonitor.RegChanged -= new EventHandler(OnRegistryChanged);
-            registryMonitor.Error -= new System.IO.ErrorEventHandler(OnRegistryError);
-            registryMonitor = null;
-        }
-
-        private void RedrawIcon()
-        {
-            trayIcon.Icon = GenerateIcon();
-        }
-
-        public static void ShowTaskView()
-        {
-            /*
-             * Unimplemented!
-             * I didn't find a efficient way to launch task viewer.
-             * Each of them has problems, but here are some solutions:
-             *   1. Run "explorer shell:::{3080F90E-D7AD-11D9-BD98-0000947B0257}"
-             *   2. Simulating <Win + Tab>
-             */
-        }
-
-        private ContextMenuStrip CreateContextMenu()
-        {
-            var menu = new ContextMenuStrip();
-
-            var autorunItem = new ToolStripMenuItem("Start application at Windows startup")
+            IconMaker iconMaker = new IconMaker(CurrentThemeColors.ForegroundColor, CurrentThemeColors.BackgroundColor);
+            
+            for (int i = 0; i < NDesktops; i++)
             {
-                Checked = AutorunManager.GetAutorunStatus(AppName, Application.ExecutablePath)
-            };
-            autorunItem.Click += (sender, e) =>
-            {
-                autorunItem.Checked = !autorunItem.Checked;
-
-                if (autorunItem.Checked)
-                {
-                    AutorunManager.AddApplicationToAutorun(AppName, Application.ExecutablePath);
-                }
-                else
-                {
-                    AutorunManager.RemoveApplicationFromAutorun(AppName);
-                }
-            };
-
-            var exitItem = new ToolStripMenuItem("Exit");
-            exitItem.Click += (sender, e) => Application.Exit();
-
-            menu.Items.Add(autorunItem);
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(exitItem);
-
-            return menu;
-        }
-
-        private Icon GenerateIcon()
-        {
-            var font = new Font(FontName, FontSize, FontStyle, GraphicsUnit.Pixel);
-            var brush = new SolidBrush(CurrentThemeColor);
-            var bitmap = new Bitmap(Width, Height);
-
-            var g = Graphics.FromImage(bitmap);
-
-            g.SmoothingMode = SmoothingMode.HighSpeed;
-            g.TextRenderingHint = TextRenderingHint.SingleBitPerPixelGridFit;
-
-            g.Clear(Color.Transparent);
-
-            // Draw border
-            // The g.DrawRectangle always uses anti-aliasing and border looks very poor at such small resolutions
-            // Implement own hack!
-            var pen = new Pen(CurrentThemeColor, 1);
-            for (int o = 0; o < BorderThinkness; o++)
-            {
-                // Top
-                g.DrawLine(pen, 0, o, Width - 1, o);
-
-                // Right
-                g.DrawLine(pen, o, 0, o, Height - 1);
-
-                // Left
-                g.DrawLine(pen, Width - 1 - o, 0, Width - 1 - o, Height - 1);
-
-                // Bottom
-                g.DrawLine(pen, 0, Height - 1 - o, Width - 1, Height - 1 - o);
-            }
-
-            // Draw text
-            var textSize = g.MeasureString(cachedDisplayText, font);
-
-            // Сalculate padding to center the text
-            // We can't assume that g.DrawString will round the coordinates correctly, so we do it manually
-            var offsetX = (float)Math.Ceiling((Width - textSize.Width) / 2);
-            var offsetY = (float)Math.Ceiling((Height - textSize.Height) / 2);
-
-            g.DrawString(cachedDisplayText, font, brush, offsetX, offsetY);
-
-            // Create icon from bitmap and return it
-            // bitmapText.GetHicon() can throw exception
-            try
-            {
-                return Icon.FromHandle(bitmap.GetHicon());
-            }
-            catch
-            {
-                return null;
+                Icon defaultIcon = iconMaker.GenerateIcon(i + 1);
+                Icon activeIcon = iconMaker.GenerateIcon(i + 1, true);
+                icons[i] = new IconSet(defaultIcon, activeIcon);
             }
         }
 
-        private Theme GetSystemTheme()
+        private void RefreshIcons()
         {
-            return (int)Registry.GetValue(RegistryThemeDataPath, "SystemUsesLightTheme", 0) == 1 ?
-                     Theme.Light :
-                     Theme.Dark;
+            for (int i = 0; i < NDesktops; i++)
+                trayIcons[i].Icon = CurrentVirtualDesktop == i + 1 ? icons[i].Active : icons[i].Default;
         }
 
-        private void OnRegistryChanged(object sender, EventArgs e)
-        {
-            systemTheme = GetSystemTheme();
-            if (systemTheme == cachedSystemTheme) return;
-
-            RedrawIcon();
-            cachedSystemTheme = systemTheme;
-        }
-
-        private void OnRegistryError(object sender, ErrorEventArgs e) => StopRegistryMonitor();
     }
 }
