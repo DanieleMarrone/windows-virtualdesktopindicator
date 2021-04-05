@@ -1,6 +1,6 @@
 # Virtual Desktop Indicator
 
-Virtual desktop indicator for system tray with light and dark theme and HiDPI support.
+Virtual desktop indicator for system tray with light and dark theme, HiDPI support and quickly switch between desktops.
 
 <img src="./preview.jpg" alt="preview" width="316" height="41"/>
 
@@ -8,7 +8,7 @@ Virtual desktop indicator for system tray with light and dark theme and HiDPI su
 
 ## Special thanks
 
-Special thanks to the user [zgdump](https://github.com/zgdump) for original version.
+Special thanks to the user [zgdump](https://github.com/zgdump) for the original version.
 
 ## License
 
