@@ -1,50 +1,21 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Reflection;
 using System.Windows.Forms;
 
 
 namespace VirtualDesktopIndicator
 {
-    public struct Palette
-    {
-        public Palette(Color foregroundColor, Color backgroundColor)
-        {
-            ForegroundColor = foregroundColor;
-            BackgroundColor = backgroundColor;
-        }
-
-        public Color ForegroundColor { get; }
-        public Color BackgroundColor { get; }
-
-    }
-
-    public struct IconSet
-    {
-        public IconSet(Icon @default, Icon active)
-        {
-            Default = @default;
-            Active = active;
-        }
-
-        public Icon Default { get; }
-        public Icon Active { get; }
-    }
-
-
     class TrayIndicator : IDisposable
     {
-        private static string AppName =>
-            Assembly.GetExecutingAssembly().GetName().Name;
-
         private int NDesktops { get; }
 
         private NotifyIcon[] trayIcons;
         private IconSet[] icons;
 
-        private ThemeMonitor themeMonitor;
         private Timer timer;
+
+        public event EventHandler<int> Switch;
 
         #region Virtual Desktops
 
@@ -59,7 +30,7 @@ namespace VirtualDesktopIndicator
         #endregion
 
 
-        #region Theme
+        #region Colors
 
         private static readonly Dictionary<Theme, Palette> ThemesColors = new Dictionary<Theme, Palette>()
         {
@@ -67,16 +38,11 @@ namespace VirtualDesktopIndicator
             { Theme.Light, new Palette(Color.Black, Color.White) },
         };
 
-        private Palette CurrentThemeColors => ThemesColors[themeMonitor.CurrentTheme];
-
         #endregion
 
-        public TrayIndicator(int nDesktops)
+        public TrayIndicator(int nDesktops, Theme theme)
         {
             NDesktops = nDesktops;
-
-            themeMonitor = new ThemeMonitor();
-            themeMonitor.ThemeChanged += (s, e) => { CreateIcons(); RefreshIcons(); };
 
             timer = new Timer { Interval = 250, Enabled = false };
             timer.Tick += TimerTick;
@@ -86,16 +52,28 @@ namespace VirtualDesktopIndicator
             trayIcons = new NotifyIcon[NDesktops];
             for (int i = 0; i < NDesktops; i++)
             {
-                trayIcons[i] = new NotifyIcon() { Tag = i, Text = $"Desktop {i+1}" };
+                trayIcons[i] = CreateNotifyIcon(i);
                 trayIcons[i].Click += TrayIconClick;
             }
 
-            CreateIcons();
+            CreateIcons(theme);
+        }
+
+
+        public void CreateIcons(Theme currentTheme)
+        {
+            BuildIcons(ThemesColors[currentTheme]);
             RefreshIcons();
         }
 
 
+        private NotifyIcon CreateNotifyIcon(int i)
+        {
+            return new NotifyIcon() { Tag = i, Text = $"Desktop {i + 1}" };
+        }
+
         #region Events
+
 
         private void TimerTick(object sender, EventArgs e)
         {
@@ -143,16 +121,7 @@ namespace VirtualDesktopIndicator
             if (i == CurrentVirtualDesktop - 1)
                 return;
 
-            SwitchToDesktop(i);
-        }
-
-        private void SwitchToDesktop(int index)
-        {
-            // create desktop if not exists
-            for (int i = VirtualDesktopsCount; i <= index; i++)
-                VirtualDesktopApi.Desktop.Create();
-
-            VirtualDesktopApi.Desktop.FromIndex(index).MakeVisible();
+            Switch?.Invoke(this, i);
 
             RefreshIcons();
         }
@@ -161,8 +130,6 @@ namespace VirtualDesktopIndicator
 
         public void Display()
         {
-            themeMonitor.Start();
-
             timer.Enabled = true;
 
             for (int i = 0; i < NDesktops; i++)
@@ -191,9 +158,9 @@ namespace VirtualDesktopIndicator
             Dispose(false);
         }
 
-        private void CreateIcons()
+        private void BuildIcons(Palette palette)
         {
-            IconMaker iconMaker = new IconMaker(CurrentThemeColors.ForegroundColor, CurrentThemeColors.BackgroundColor);
+            IconMaker iconMaker = new IconMaker(palette.ForegroundColor, palette.BackgroundColor);
             
             for (int i = 0; i < NDesktops; i++)
             {
@@ -209,5 +176,29 @@ namespace VirtualDesktopIndicator
                 trayIcons[i].Icon = CurrentVirtualDesktop == i + 1 ? icons[i].Active : icons[i].Default;
         }
 
+    }
+    public struct Palette
+    {
+        public Palette(Color foregroundColor, Color backgroundColor)
+        {
+            ForegroundColor = foregroundColor;
+            BackgroundColor = backgroundColor;
+        }
+
+        public Color ForegroundColor { get; }
+        public Color BackgroundColor { get; }
+
+    }
+
+    public struct IconSet
+    {
+        public IconSet(Icon @default, Icon active)
+        {
+            Default = @default;
+            Active = active;
+        }
+
+        public Icon Default { get; }
+        public Icon Active { get; }
     }
 }
