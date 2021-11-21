@@ -23,6 +23,8 @@ namespace VirtualDesktopIndicator
             if (args.Length != 1 || !Int32.TryParse(args[0], out nDesktops))
                 nDesktops = 4;
 
+            KeyboardHook.Attach(MoveWindowLeft, MoveWindowRight);
+
             using (ThemeMonitor themeMonitor = new ThemeMonitor())
             using (TrayIndicator ti = new TrayIndicator(nDesktops, themeMonitor.CurrentTheme))
             {
@@ -37,6 +39,8 @@ namespace VirtualDesktopIndicator
 
                 ti.Switch -= SwitchToDesktop;
             }
+
+            KeyboardHook.Detach();
         }
 
         static void SwitchToDesktop(object sender, int index)
@@ -48,6 +52,25 @@ namespace VirtualDesktopIndicator
             VirtualDesktopApi.Desktop.FromIndex(index).MakeVisible();
         }
 
+        static void MoveWindowLeft()
+        {
+            VirtualDesktopApi.Desktop left = VirtualDesktopApi.Desktop.Current.Left;
+            if (left != null)
+            {
+                left.MoveActiveWindow();
+                left.MakeVisible();
+            }
 
+        }
+
+        static void MoveWindowRight()
+        {
+            VirtualDesktopApi.Desktop right = VirtualDesktopApi.Desktop.Current.Right;
+            if (right != null)
+            {
+                right.MoveActiveWindow();
+                right.MakeVisible();
+            }
+        }
     }
 }

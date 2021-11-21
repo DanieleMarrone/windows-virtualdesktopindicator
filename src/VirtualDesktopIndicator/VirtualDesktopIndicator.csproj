@@ -112,6 +112,8 @@
   <ItemGroup>
     <Compile Include="Helpers\AutorunManager.cs" />
     <Compile Include="IconMaker.cs" />
+    <Compile Include="InterceptKeys.cs" />
+    <Compile Include="KeyboardHook.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Helpers\SystemMetricsApi.cs" />

@@ -531,15 +531,19 @@ namespace VirtualDesktopApi
 			else
 			{ // window of other process
 				IApplicationView view;
-				DesktopManager.ApplicationViewCollection.GetViewForHwnd(hWnd, out view);
 				try
 				{
+					DesktopManager.ApplicationViewCollection.GetViewForHwnd(hWnd, out view);
 					DesktopManager.VirtualDesktopManagerInternal.MoveViewToDesktop(view, ivd);
 				}
 				catch
 				{ // could not move active window, try main window (or whatever windows thinks is the main window)
-					DesktopManager.ApplicationViewCollection.GetViewForHwnd(System.Diagnostics.Process.GetProcessById(processId).MainWindowHandle, out view);
-					DesktopManager.VirtualDesktopManagerInternal.MoveViewToDesktop(view, ivd);
+					try
+					{
+						DesktopManager.ApplicationViewCollection.GetViewForHwnd(System.Diagnostics.Process.GetProcessById(processId).MainWindowHandle, out view);
+						DesktopManager.VirtualDesktopManagerInternal.MoveViewToDesktop(view, ivd);
+					}
+					catch { }
 				}
 			}
 		}
